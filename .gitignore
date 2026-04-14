@@ -3,3 +3,4 @@
 bin/
 obj/
 *.sln
+Local.Build.props
