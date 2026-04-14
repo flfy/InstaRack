@@ -13,43 +13,39 @@ namespace InstaRack
 	public sealed class InstaRackMod : MelonMod
 	{
 		public const string ModName = "InstaRack";
+		
+		public static MelonLogger.Instance Logger { get; private set; }
+		public static PlayerManager playerManager => PlayerManager.instance;
 
 		public override void OnInitializeMelon()
 		{
+			Logger = LoggerInstance;
+
 			HarmonyInstance.PatchAll(Assembly.GetExecutingAssembly());
+
+			Logger.Msg("InstaRack initialized.");
 		}
 
-		private static bool IsPlacingRack(PlayerManager playerManager)
+		private static bool IsPlacingRack()
 		{
 			return playerManager != null && playerManager.objectInHand == PlayerManager.ObjectInHand.Rack;
 		}
 
-		private static void RestorePlayerControl(PlayerManager playerManager)
+		private static bool InstantiateRackDirectly(RackMount rackMount)
 		{
-			if (playerManager == null)
+			if (rackMount == null || rackMount.isRackInstantiated)
 			{
-				return;
+				return false;
 			}
 
-			playerManager.enabledMouseMovement = true;
-			playerManager.enabledPlayerMovement = true;
-			playerManager.enabledRayLookInteract = true;
-			playerManager.LockedCursorForPlayerMovement();
-
-			Image waitImage = playerManager.imageWaitForAction;
-			if (waitImage != null)
+			InteractObjectData saveData = new(rackMount);
+			GameObject rack = rackMount.InstantiateRack(saveData);
+			if (rack == null)
 			{
-				waitImage.fillAmount = 0f;
-				waitImage.enabled = false;
+				return false;
 			}
-		}
 
-		private static void ClearRackBoxFromHands(PlayerManager playerManager)
-		{
-			if (!IsPlacingRack(playerManager))
-			{
-				return;
-			}
+			rackMount.isRackInstantiated = true;
 
 			if (playerManager.objectInHandGO != null)
 			{
@@ -68,35 +64,50 @@ namespace InstaRack
 
 			playerManager.numberOfObjectsInHand = 0;
 			playerManager.objectInHand = PlayerManager.ObjectInHand.None;
-		}
+		
+			playerManager.enabledMouseMovement = true;
+			playerManager.enabledPlayerMovement = true;
+			playerManager.enabledRayLookInteract = true;
 
-		[HarmonyPatch(typeof(PlayerManager), nameof(PlayerManager.WaitForActionToFinish))]
-		private static class PlayerManagerWFAPrefix
-		{
-			private static void Prefix(PlayerManager __instance, ref float _time)
+			playerManager.LockedCursorForPlayerMovement();
+
+			Image waitImage = playerManager.imageWaitForAction;
+			if (waitImage != null)
 			{
-				if (!IsPlacingRack(__instance))
-				{
-					return;
-				}
-
-				_time = 0f;
+				waitImage.fillAmount = 0f;
+				waitImage.enabled = false;
 			}
+
+			Logger.Msg($"Rack instantiated directly at {rackMount.uid}.");
+			
+			return true;
 		}
 
 		[HarmonyPatch(typeof(RackMount), nameof(RackMount.InteractOnClick))]
-		private static class RackMountPostfix
+		private static class RackMountInteractPatch
 		{
-			private static void Postfix()
+			private static bool Prefix(RackMount __instance)
 			{
-				PlayerManager playerManager = PlayerManager.instance;
-				if (!IsPlacingRack(playerManager))
+				if (!IsPlacingRack())
 				{
-					return;
+					return true;
 				}
 
-				ClearRackBoxFromHands(playerManager);
-				RestorePlayerControl(playerManager);
+				try
+				{
+					if (!InstantiateRackDirectly(__instance))
+					{
+						return true;
+					}
+
+					return false;
+				}
+				catch (Exception exception)
+				{
+					Logger.Warning($"Direct rack instantiation failed at {__instance.uid}: {exception.GetType().Name}: {exception.Message}");
+
+					return true;
+				}
 			}
 		}
 	}
