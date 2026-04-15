@@ -5,25 +5,18 @@ using MelonLoader;
 using UnityEngine;
 using UnityEngine.UI;
 
-[assembly: MelonInfo(typeof(InstaRack.InstaRackMod), "InstaRack", "1.0.0", "derrick")]
+[assembly: MelonInfo(typeof(InstaRack.InstaRackMod), "InstaRack", "1.0.2", "derrick")]
 [assembly: MelonGame("Waseku", "Data Center")]
 
 namespace InstaRack
 {
 	public sealed class InstaRackMod : MelonMod
 	{
-		public const string ModName = "InstaRack";
-		
-		public static MelonLogger.Instance Logger { get; private set; }
 		public static PlayerManager playerManager => PlayerManager.instance;
 
 		public override void OnInitializeMelon()
 		{
-			Logger = LoggerInstance;
-
 			HarmonyInstance.PatchAll(Assembly.GetExecutingAssembly());
-
-			Logger.Msg("InstaRack initialized.");
 		}
 
 		private static bool IsPlacingRack()
@@ -31,18 +24,130 @@ namespace InstaRack
 			return playerManager != null && playerManager.objectInHand == PlayerManager.ObjectInHand.Rack;
 		}
 
-		private static bool InstantiateRackDirectly(RackMount rackMount)
+		private static UsableObject GetHeldRack()
+		{
+			if (playerManager?.objectInHandGO == null)
+			{
+				return null;
+			}
+
+			for (int i = 0; i < playerManager.objectInHandGO.Count; i++)
+			{
+				GameObject heldObject = playerManager.objectInHandGO[i];
+				if (heldObject == null)
+				{
+					continue;
+				}
+
+				UsableObject usableObject = heldObject.GetComponent<UsableObject>();
+				if (usableObject != null)
+				{
+					return usableObject;
+				}
+
+				usableObject = heldObject.GetComponentInChildren<UsableObject>(true);
+				if (usableObject != null)
+				{
+					return usableObject;
+				}
+			}
+
+			return null;
+		}
+
+		private static bool TryGetRackColor(UsableObject heldRack, out Color color)
+		{
+			color = default;
+			if (heldRack?.saveValue == null || heldRack.saveValue.Length < 7)
+			{
+				return false;
+			}
+
+			color = new Color(
+				heldRack.saveValue[3],
+				heldRack.saveValue[4],
+				heldRack.saveValue[5],
+				heldRack.saveValue[6]);
+			return true;
+		}
+
+		private static void CopyRackState(RackMount rackMount, UsableObject heldRack)
+		{
+			if (rackMount == null || heldRack == null)
+			{
+				return;
+			}
+
+			rackMount.saveValue = heldRack.saveValue;
+			rackMount.saveIntArray = heldRack.saveIntArray;
+			rackMount.saveIntArray2 = heldRack.saveIntArray2;
+		}
+
+		private static void ApplyRackColor(GameObject rack, Color rackColor)
+		{
+			if (rack == null)
+			{
+				return;
+			}
+
+			foreach (Renderer renderer in rack.GetComponentsInChildren<Renderer>(true))
+			{
+				if (renderer == null)
+				{
+					continue;
+				}
+
+				Material[] materials = renderer.materials;
+				bool changedRenderer = false;
+
+				for (int i = 0; i < materials.Length; i++)
+				{
+					Material material = materials[i];
+					if (material == null || !material.name.Contains("BrushedAluminiumRack", StringComparison.OrdinalIgnoreCase))
+					{
+						continue;
+					}
+
+					if (material.HasProperty("_Color"))
+					{
+						material.color = rackColor;
+					}
+
+					if (material.HasProperty("_BaseColor"))
+					{
+						material.SetColor("_BaseColor", rackColor);
+					}
+
+					changedRenderer = true;
+				}
+
+				if (changedRenderer)
+				{
+					renderer.materials = materials;
+				}
+			}
+		}
+
+		private static bool PlaceRack(RackMount rackMount)
 		{
 			if (rackMount == null || rackMount.isRackInstantiated)
 			{
 				return false;
 			}
 
+			UsableObject heldRack = GetHeldRack();
+			CopyRackState(rackMount, heldRack);
+
 			InteractObjectData saveData = new(rackMount);
 			GameObject rack = rackMount.InstantiateRack(saveData);
 			if (rack == null)
 			{
 				return false;
+			}
+
+			if (TryGetRackColor(heldRack, out Color rackColor))
+			{
+				ApplyRackColor(rack, rackColor);
 			}
 
 			rackMount.isRackInstantiated = true;
@@ -64,11 +169,11 @@ namespace InstaRack
 
 			playerManager.numberOfObjectsInHand = 0;
 			playerManager.objectInHand = PlayerManager.ObjectInHand.None;
-		
+
 			playerManager.enabledMouseMovement = true;
 			playerManager.enabledPlayerMovement = true;
 			playerManager.enabledRayLookInteract = true;
-
+			
 			playerManager.LockedCursorForPlayerMovement();
 
 			Image waitImage = playerManager.imageWaitForAction;
@@ -78,8 +183,6 @@ namespace InstaRack
 				waitImage.enabled = false;
 			}
 
-			Logger.Msg($"Rack instantiated directly at {rackMount.uid}.");
-			
 			return true;
 		}
 
@@ -95,17 +198,15 @@ namespace InstaRack
 
 				try
 				{
-					if (!InstantiateRackDirectly(__instance))
+					if (!PlaceRack(__instance))
 					{
 						return true;
 					}
 
 					return false;
 				}
-				catch (Exception exception)
+				catch
 				{
-					Logger.Warning($"Direct rack instantiation failed at {__instance.uid}: {exception.GetType().Name}: {exception.Message}");
-
 					return true;
 				}
 			}
