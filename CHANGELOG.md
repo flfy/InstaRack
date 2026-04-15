@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [1.0.3] - 2026-04-14
+
+### Fixed
+- Preserve rack custom colors during instant placement, third time *was* the charm.
+
 ## [1.0.2] - 2026-04-14
 
 ### Fixed

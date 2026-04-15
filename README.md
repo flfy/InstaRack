@@ -52,7 +52,7 @@ dotnet build InstaRack.csproj
 The compiled DLL is written to:
 
 ```text
-bin/1.0.2/Debug/net6.0/InstaRack.dll
+bin/1.0.3/Debug/net6.0/InstaRack.dll
 ```
 
 After the build completes, the project also copies `InstaRack.dll` into:
