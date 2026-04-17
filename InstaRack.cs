@@ -21,8 +21,6 @@ namespace InstaRack
 		private static Il2CppStructArray<int> pendingUnmountSaveIntArray2;
 		private static bool hasPendingUnmountColor;
 		private static Color pendingUnmountColor;
-		private static bool hasPendingUnmountPosition;
-		private static Vector3 pendingUnmountPosition;
 		private static int pendingUnmountTicket;
 
 		private static bool IsPlacingRack()
@@ -147,18 +145,6 @@ namespace InstaRack
 			}
 
 			return clone;
-		}
-
-		private static void CopyRackState(Interact target, Interact source)
-		{
-			if (target == null || source == null)
-			{
-				return;
-			}
-
-			target.saveValue = CloneArray(source.saveValue);
-			target.saveIntArray = CloneArray(source.saveIntArray);
-			target.saveIntArray2 = CloneArray(source.saveIntArray2);
 		}
 
 		private static void SetRackColor(Interact target, Color color)
@@ -433,7 +419,7 @@ namespace InstaRack
 				while (true)
 				{
 					RefreshWorldRackBoxes();
-					yield return new WaitForSeconds(01f);
+					yield return new WaitForSeconds(0.25f);
 				}
 			}
 
@@ -464,43 +450,6 @@ namespace InstaRack
 			pendingUnmountSaveIntArray2 = null;
 			hasPendingUnmountColor = false;
 			pendingUnmountColor = default;
-			hasPendingUnmountPosition = false;
-			pendingUnmountPosition = default;
-		}
-
-		private static UsableObject FindPendingUnmountBox()
-		{
-			UsableObject heldRack = GetHeldRack();
-			if (IsRackBox(heldRack))
-			{
-				return heldRack;
-			}
-
-			if (!hasPendingUnmountPosition)
-			{
-				return null;
-			}
-
-			UsableObject bestMatch = null;
-			float bestDistanceSqr = float.MaxValue;
-			foreach (UsableObject usableObject in Resources.FindObjectsOfTypeAll<UsableObject>())
-			{
-				if (!IsRackBox(usableObject) || usableObject.gameObject == null || !usableObject.gameObject.scene.IsValid())
-				{
-					continue;
-				}
-
-				float distanceSqr = (usableObject.transform.position - pendingUnmountPosition).sqrMagnitude;
-				if (distanceSqr > 16f || distanceSqr >= bestDistanceSqr)
-				{
-					continue;
-				}
-
-				bestMatch = usableObject;
-				bestDistanceSqr = distanceSqr;
-			}
-
-			return bestMatch;
 		}
 
 		private static IEnumerator WaitForUnmountBox(int ticket)
@@ -512,10 +461,10 @@ namespace InstaRack
 					yield break;
 				}
 
-				UsableObject boxedRack = FindPendingUnmountBox();
-				if (boxedRack != null)
+				UsableObject heldRack = GetHeldRack();
+				if (IsRackBox(heldRack))
 				{
-					ApplyPendingUnmountState(boxedRack);
+					ApplyPendingUnmountState(heldRack);
 					yield break;
 				}
 
@@ -537,8 +486,6 @@ namespace InstaRack
 			pendingUnmountSaveIntArray = CloneArray(rackMount.saveIntArray);
 			pendingUnmountSaveIntArray2 = CloneArray(rackMount.saveIntArray2);
 			hasPendingUnmountColor = TryGetRackColor(rackMount, out pendingUnmountColor);
-			hasPendingUnmountPosition = true;
-			pendingUnmountPosition = rackMount.transform.position;
 			pendingUnmountTicket++;
 			MelonCoroutines.Start(WaitForUnmountBox(pendingUnmountTicket));
 		}
