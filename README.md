@@ -4,7 +4,8 @@
 
 ## Features
 
-- Instantaneous rack placement. That is all.
+- Instantaneous rack placement.
+- Matches Rack boxes to the Rack color.
 
 ## Requirements
 
