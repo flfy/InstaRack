@@ -24,6 +24,8 @@ namespace InstaRack
 		private static bool hasPendingUnmountColor;
 		private static Color pendingUnmountColor;
 		private static int pendingUnmountTicket;
+		private static readonly HashSet<int> trackedWorldRackBoxes = new();
+		private static int pendingShopRefreshTicket;
 
 		private static bool IsPlacingRack()
 		{
@@ -560,7 +562,7 @@ namespace InstaRack
 				}
 			}
 
-		private static void RefreshWorldRackBoxes()
+		private static void RefreshNewWorldRackBoxes()
 		{
 			foreach (UsableObject usableObject in Resources.FindObjectsOfTypeAll<UsableObject>())
 			{
@@ -569,15 +571,27 @@ namespace InstaRack
 					continue;
 				}
 
+				int instanceId = usableObject.gameObject.GetInstanceID();
+				if (!trackedWorldRackBoxes.Add(instanceId))
+				{
+					continue;
+				}
+
 				RefreshBoxColor(usableObject);
+				MelonCoroutines.Start(RefreshBoxColorLater(usableObject, 30));
 			}
 		}
 
-		private static IEnumerator RefreshWorldRackBoxesForFrames(int maxFrames = 60)
+		private static IEnumerator RefreshNewWorldRackBoxesForFrames(int ticket, int maxFrames = 12)
 		{
 			for (int frame = 0; frame < maxFrames; frame++)
 			{
-				RefreshWorldRackBoxes();
+				if (ticket != pendingShopRefreshTicket)
+				{
+					yield break;
+				}
+
+				RefreshNewWorldRackBoxes();
 				yield return null;
 			}
 		}
@@ -840,7 +854,8 @@ namespace InstaRack
 						return;
 					}
 
-					MelonCoroutines.Start(RefreshWorldRackBoxesForFrames());
+					pendingShopRefreshTicket++;
+					MelonCoroutines.Start(RefreshNewWorldRackBoxesForFrames(pendingShopRefreshTicket));
 				}
 			}
 
