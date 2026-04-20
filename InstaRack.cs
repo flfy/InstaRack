@@ -1,19 +1,21 @@
-using System;
 using System.Collections;
 using HarmonyLib;
 using Il2Cpp;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using MelonLoader;
 using UnityEngine;
-using UnityEngine.UI;
+using UnityEngine.UI;	
 
-[assembly: MelonInfo(typeof(InstaRack.InstaRackMod), "InstaRack", "1.0.4", "derrick")]
+[assembly: MelonInfo(typeof(InstaRack.InstaRackMod), "InstaRack", "1.0.5", "derrick")]
 [assembly: MelonGame("Waseku", "Data Center")]
 
 namespace InstaRack
 {
 	public sealed class InstaRackMod : MelonMod
 	{
+		private const int RackColorMarkerA = 1229735501;
+		private const int RackColorMarkerB = 1380011595;
+
 		public static PlayerManager playerManager => PlayerManager.instance;
 
 		private static Il2CppStructArray<float> pendingUnmountSaveValue;
@@ -26,11 +28,6 @@ namespace InstaRack
 		private static bool IsPlacingRack()
 		{
 			return playerManager != null && playerManager.objectInHand == PlayerManager.ObjectInHand.Rack;
-		}
-
-		public override void OnInitializeMelon()
-		{
-			MelonCoroutines.Start(RefreshWorldRackBoxesLoop());
 		}
 
 		private static UsableObject GetHeldRack()
@@ -64,39 +61,59 @@ namespace InstaRack
 			return null;
 		}
 
-		private static bool TryGetRackColor(Interact source, out Color color)
+		private static bool HasRackColorMarker(Il2CppStructArray<int> source)
+		{
+			return source != null
+				&& source.Length >= 2
+				&& source[source.Length - 2] == RackColorMarkerA
+				&& source[source.Length - 1] == RackColorMarkerB;
+		}
+
+		private static Il2CppStructArray<int> EnsureRackColorMarker(Il2CppStructArray<int> source)
+		{
+			if (HasRackColorMarker(source))
+			{
+				return source;
+			}
+
+			if (source == null)
+			{
+				Il2CppStructArray<int> markerOnly = new(2);
+				markerOnly[0] = RackColorMarkerA;
+				markerOnly[1] = RackColorMarkerB;
+				return markerOnly;
+			}
+
+			Il2CppStructArray<int> expanded = new(source.Length + 2);
+			for (int i = 0; i < source.Length; i++)
+			{
+				expanded[i] = source[i];
+			}
+
+			expanded[expanded.Length - 2] = RackColorMarkerA;
+			expanded[expanded.Length - 1] = RackColorMarkerB;
+			return expanded;
+		}
+
+		private static bool GetRackColor(Interact source, out Color color)
 		{
 			color = default;
-			if (source?.saveValue == null || source.saveValue.Length < 7)
+			if (source == null)
 			{
 				return false;
 			}
 
-			color = new Color(
-				source.saveValue[3],
-				source.saveValue[4],
-				source.saveValue[5],
-				source.saveValue[6]);
-			return true;
+			return GetMarkedRackColor(source.saveValue, source.saveIntArray2, out color)
+				|| (source is UsableObject boxedRack && IsRackBox(boxedRack) && GetLooseRackColor(source.saveValue, out color));
 		}
 
-		private static bool TryGetRackColor(InteractObjectData data, out Color color)
+		private static bool GetRackColor(InteractObjectData data, out Color color)
 		{
 			color = default;
-			if (data?.value == null || data.value.Length < 7)
-			{
-				return false;
-			}
-
-			color = new Color(
-				data.value[3],
-				data.value[4],
-				data.value[5],
-				data.value[6]);
-			return true;
+			return GetMarkedRackColor(data?.value, data?.saveIntArray2, out color);
 		}
 
-		private static bool TryGetRackColor(GameObject root, out Color color)
+		private static bool GetRackColor(GameObject root, out Color color)
 		{
 			color = default;
 			if (root == null)
@@ -106,7 +123,7 @@ namespace InstaRack
 
 			foreach (Interact interact in root.GetComponentsInChildren<Interact>(true))
 			{
-				if (TryGetRackColor(interact, out color))
+				if (GetRackColor(interact, out color))
 				{
 					return true;
 				}
@@ -147,6 +164,44 @@ namespace InstaRack
 			return clone;
 		}
 
+		private static bool GetMarkedRackColor(Il2CppStructArray<float> values, Il2CppStructArray<int> markerSource, out Color color)
+		{
+			color = default;
+			if (values == null || values.Length < 7 || !HasRackColorMarker(markerSource))
+			{
+				return false;
+			}
+
+			color = new Color(values[3], values[4], values[5], values[6]);
+			return true;
+		}
+
+		private static bool GetLooseRackColor(Il2CppStructArray<float> values, out Color color)
+		{
+			color = default;
+			if (values == null || values.Length < 7)
+			{
+				return false;
+			}
+
+			Color parsed = new(values[3], values[4], values[5], values[6]);
+			if (!IsReasonableColor(parsed))
+			{
+				return false;
+			}
+
+			color = parsed;
+			return true;
+		}
+
+		private static bool IsReasonableColor(Color color)
+		{
+			return color.r >= 0f && color.r <= 1f
+				&& color.g >= 0f && color.g <= 1f
+				&& color.b >= 0f && color.b <= 1f
+				&& color.a > 0f && color.a <= 1f;
+		}
+
 		private static void SetRackColor(Interact target, Color color)
 		{
 			if (target == null)
@@ -175,6 +230,52 @@ namespace InstaRack
 			value[5] = color.b;
 			value[6] = color.a;
 			target.saveValue = value;
+			target.saveIntArray2 = EnsureRackColorMarker(CloneArray(target.saveIntArray2));
+		}
+
+		private static bool GetMaterialColor(GameObject root, string materialName, out Color color)
+		{
+			color = default;
+			if (root == null)
+			{
+				return false;
+			}
+
+			foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+			{
+				if (renderer == null)
+				{
+					continue;
+				}
+
+				foreach (Material material in renderer.materials)
+				{
+					if (material == null || !material.name.Contains(materialName, StringComparison.OrdinalIgnoreCase))
+					{
+						continue;
+					}
+
+					if (material.HasProperty("_BaseColor"))
+					{
+						color = material.GetColor("_BaseColor");
+						return true;
+					}
+
+					if (material.HasProperty("_Color"))
+					{
+						color = material.color;
+						return true;
+					}
+				}
+			}
+
+			return false;
+		}
+
+		private static bool GetVisualRackColor(GameObject root, out Color color)
+		{
+			return GetMaterialColor(root, "BrushedAluminiumRack", out color)
+				|| GetMaterialColor(root, "BoxedRack", out color);
 		}
 
 		private static InteractObjectData CreateRackData(RackMount rackMount, UsableObject heldRack)
@@ -230,17 +331,63 @@ namespace InstaRack
 							continue;
 						}
 
-						if (material.HasProperty("_Color"))
-						{
-							material.color = color;
-						}
+						changedRenderer |= TrySetMaterialColor(material, color);
+					}
 
-						if (material.HasProperty("_BaseColor"))
-						{
-							material.SetColor("_BaseColor", color);
-						}
+					if (changedRenderer)
+					{
+						renderer.materials = materials;
+						changedAnyRenderer = true;
+					}
+				}
 
-						changedRenderer = true;
+				return changedAnyRenderer;
+			}
+
+			private static bool TrySetMaterialColor(Material material, Color color)
+			{
+				if (material == null)
+				{
+					return false;
+				}
+
+				bool changed = false;
+				if (material.HasProperty("_Color"))
+				{
+					material.color = color;
+					changed = true;
+				}
+
+				if (material.HasProperty("_BaseColor"))
+				{
+					material.SetColor("_BaseColor", color);
+					changed = true;
+				}
+
+				return changed;
+			}
+
+			private static bool ApplyColorToAllRenderers(GameObject root, Color color)
+			{
+				if (root == null)
+				{
+					return false;
+				}
+
+				bool changedAnyRenderer = false;
+				foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+				{
+					if (renderer == null)
+					{
+						continue;
+					}
+
+					Material[] materials = renderer.materials;
+					bool changedRenderer = false;
+
+					for (int i = 0; i < materials.Length; i++)
+					{
+						changedRenderer |= TrySetMaterialColor(materials[i], color);
 					}
 
 					if (changedRenderer)
@@ -260,7 +407,13 @@ namespace InstaRack
 
 			private static bool RefreshRackColor(GameObject rack, Interact source)
 			{
-				if (rack == null || !TryGetRackColor(source, out Color rackColor))
+				if (rack == null)
+				{
+					return false;
+				}
+
+				if (!GetRackColor(source, out Color rackColor)
+					&& !GetVisualRackColor(rack, out rackColor))
 				{
 					return false;
 				}
@@ -277,7 +430,9 @@ namespace InstaRack
 					return false;
 				}
 
-				if (!TryGetRackColor(data, out Color rackColor) && !TryGetRackColor(fallback, out rackColor))
+				if (!GetRackColor(data, out Color rackColor)
+					&& !GetRackColor(fallback, out rackColor)
+					&& !GetVisualRackColor(rack, out rackColor))
 				{
 					return false;
 				}
@@ -289,7 +444,8 @@ namespace InstaRack
 
 			private static bool ApplyBoxColor(GameObject boxedRack, Color rackColor)
 			{
-				return ApplyColor(boxedRack, rackColor, "BoxedRack");
+				return ApplyColor(boxedRack, rackColor, "BoxedRack")
+					|| ApplyColorToAllRenderers(boxedRack, rackColor);
 			}
 
 			private static bool RefreshBoxColor(UsableObject boxedRack)
@@ -299,8 +455,9 @@ namespace InstaRack
 					return false;
 				}
 
-				if (!TryGetRackColor(boxedRack, out Color rackColor)
-					&& !TryGetRackColor(boxedRack.gameObject, out rackColor))
+				if (!GetRackColor(boxedRack, out Color rackColor)
+					&& !GetRackColor(boxedRack.gameObject, out rackColor)
+					&& !GetVisualRackColor(boxedRack.gameObject, out rackColor))
 				{
 					return false;
 				}
@@ -317,9 +474,11 @@ namespace InstaRack
 					return false;
 				}
 
-				if (!TryGetRackColor(data, out Color rackColor)
-					&& !TryGetRackColor(boxedRack, out rackColor)
-					&& !TryGetRackColor(boxedRack.gameObject, out rackColor))
+				if (!GetRackColor(data, out Color rackColor)
+					&& !GetLooseRackColor(data?.value, out rackColor)
+					&& !GetRackColor(boxedRack, out rackColor)
+					&& !GetRackColor(boxedRack.gameObject, out rackColor)
+					&& !GetVisualRackColor(boxedRack.gameObject, out rackColor))
 				{
 					return false;
 				}
@@ -401,27 +560,27 @@ namespace InstaRack
 				}
 			}
 
-			private static void RefreshWorldRackBoxes()
+		private static void RefreshWorldRackBoxes()
+		{
+			foreach (UsableObject usableObject in Resources.FindObjectsOfTypeAll<UsableObject>())
 			{
-				foreach (UsableObject usableObject in Resources.FindObjectsOfTypeAll<UsableObject>())
+				if (usableObject?.gameObject == null || !usableObject.gameObject.scene.IsValid() || !IsRackBox(usableObject))
 				{
-					if (usableObject?.gameObject == null || !usableObject.gameObject.scene.IsValid())
-					{
-						continue;
-					}
-
-					RefreshBoxColor(usableObject);
+					continue;
 				}
-			}
 
-			private static IEnumerator RefreshWorldRackBoxesLoop()
+				RefreshBoxColor(usableObject);
+			}
+		}
+
+		private static IEnumerator RefreshWorldRackBoxesForFrames(int maxFrames = 60)
+		{
+			for (int frame = 0; frame < maxFrames; frame++)
 			{
-				while (true)
-				{
-					RefreshWorldRackBoxes();
-					yield return new WaitForSeconds(0.25f);
-				}
+				RefreshWorldRackBoxes();
+				yield return null;
 			}
+		}
 
 		private static bool IsRackBox(UsableObject usableObject)
 		{
@@ -485,7 +644,8 @@ namespace InstaRack
 			pendingUnmountSaveValue = CloneArray(rackMount.saveValue);
 			pendingUnmountSaveIntArray = CloneArray(rackMount.saveIntArray);
 			pendingUnmountSaveIntArray2 = CloneArray(rackMount.saveIntArray2);
-			hasPendingUnmountColor = TryGetRackColor(rackMount, out pendingUnmountColor);
+			hasPendingUnmountColor = GetRackColor(rackMount, out pendingUnmountColor)
+				|| GetVisualRackColor(rack?.gameObject, out pendingUnmountColor);
 			pendingUnmountTicket++;
 			MelonCoroutines.Start(WaitForUnmountBox(pendingUnmountTicket));
 		}
@@ -526,7 +686,8 @@ namespace InstaRack
 				return false;
 			}
 
-				if (TryGetRackColor(heldRack, out Color rackColor))
+				if (GetRackColor(heldRack, out Color rackColor)
+					|| GetVisualRackColor(heldRack?.gameObject, out rackColor))
 				{
 					SetRackColor(rackMount, rackColor);
 					SyncRackColor(rack, rackColor);
@@ -658,7 +819,7 @@ namespace InstaRack
 			{
 				private static void Postfix(Interact __instance, InteractObjectData data)
 				{
-					UsableObject boxedRack = __instance.TryCast<UsableObject>();
+					UsableObject boxedRack = __instance.Cast<UsableObject>();
 					if (boxedRack == null)
 					{
 						return;
@@ -669,39 +830,19 @@ namespace InstaRack
 				}
 			}
 
-			[HarmonyPatch(typeof(UsableObject), nameof(UsableObject.OnLoad))]
-			private static class UsableObjectOnLoadPatch
+			[HarmonyPatch(typeof(ComputerShop), "ApplyColorToSpawnedItem")]
+			private static class ComputerShopApplyColorToSpawnedItemPatch
 			{
-				private static void Postfix(UsableObject __instance, InteractObjectData data)
+				private static void Postfix(PlayerManager.ObjectInHand __2)
 				{
-					if (!IsRackBox(__instance))
+					if (__2 != PlayerManager.ObjectInHand.Rack)
 					{
 						return;
 					}
 
-					RefreshBoxColor(__instance, data);
-					MelonCoroutines.Start(RefreshBoxColorLater(__instance, data));
+					MelonCoroutines.Start(RefreshWorldRackBoxesForFrames());
 				}
 			}
 
-			[HarmonyPatch(typeof(UsableObject), "OnEnable")]
-			private static class RackBoxOnEnablePatch
-			{
-				private static void Postfix(UsableObject __instance)
-				{
-					if (!IsRackBox(__instance))
-					{
-						return;
-					}
-
-					if (HasPendingUnmountState())
-					{
-						ApplyPendingUnmountState(__instance);
-					}
-
-					RefreshBoxColor(__instance);
-					MelonCoroutines.Start(RefreshBoxColorLater(__instance));
-				}
-			}
 	}
 }

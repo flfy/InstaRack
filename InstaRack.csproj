@@ -8,7 +8,7 @@
     <Nullable>disable</Nullable>
     <AssemblyName>InstaRack</AssemblyName>
     <RootNamespace>InstaRack</RootNamespace>
-    <Version>1.0.4</Version>
+    <Version>1.0.5</Version>
     <LangVersion>latest</LangVersion>
     <BaseOutputPath>bin/$(Version)/</BaseOutputPath>
     <gamepath Condition="'$(gamepath)' == ''">$(MSBuildProjectDirectory)/../..</gamepath>

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [1.0.5] - 2026-04-18
+
+### Fixed
+- Stop scanning all rack boxes on a timer.
+- Ignore untagged legacy save data when reading rack colors so pre-mod save files keep their original rack appearance.
+
 ## [1.0.4] - 2026-04-15
 
 ### Fixed
